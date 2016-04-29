@@ -4,6 +4,7 @@ local tlast = require "typedlua.tlast"
 local tlparser = require "typedlua.tlparser"
 local tltype = require "typedlua.tltype"
 local tlchecker = require "typedlua.tlchecker"
+local tlruntime = require "typedlua.tlruntime"
 local tlcode = require "typedlua.tlcode"
 
 -- expected result, result, subject
@@ -51,6 +52,43 @@ local function generate (s)
     return m .. "\n"
   else
     return tlcode.generate(t)
+  end
+end
+
+local function generate_runtime (s)
+  local strict = false
+  --local strict = true
+  local t,m = tlparser.parse(s,filename,strict,false)
+  if not t then
+    error(m)
+    os.exit(1)
+  end
+  m = tlchecker.typecheck(t,s,filename,strict,false)
+  m = tlchecker.error_msgs(m,false)
+  if m then
+    return m .. "\n"
+  else
+    tlruntime.add_runtime_checks(t)
+    return tlcode.generate(t)
+  end
+end
+
+local passed_tests = 0
+local failed_tests = 0
+
+local function check (e, r)
+  if e == r then
+    passed_tests = passed_tests + 1
+  else
+    failed_tests = failed_tests + 1
+    print("e:")
+    print(e)
+    print("r:")
+    print(r)
+  end
+
+  if abort_on_error then
+    assert(e == r)
   end
 end
 
@@ -5329,4 +5367,504 @@ circle2:area()
 r = generate(s)
 assert(r == e)
 
-print("OK")
+print("> testing runtime checks...")
+
+-- function definition in different places builds the proper ID
+
+s = [=[
+
+function f1(b: string) return 1 end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f1 = argscheck("f1 (string)") .. function (b) return 1 end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f2 = function(b: string) return 1 end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f2 = argscheck("f2 (string)") .. function (b) return 1 end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+local function f3(b: string) return 1 end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+local f3 = argscheck("f3 (string)") .. function (b) 
+  return 1
+end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+local f4 = function(b: string) return 1 end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+local f4 = argscheck("f4 (string)") .. function (b) return 1 end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+t1 = {
+  f5 = function(b: string) return 1 end,
+
+       function(b: string) return 1 end
+
+}
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+t1 = {f5 = argscheck("t1.f5 (string)") .. function (b) 
+  return 1
+end, argscheck("t1[1] (string)") .. function (b) 
+  return 1
+end}
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+local t2 = {}
+t2.f6 = function(b: string) return 1 end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+local t2 = {}
+t2.f6 = argscheck("t2.f6 (string)") .. function (b) return 1 end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+local t2 = {}
+function t2.f7 (b: string) return 1 end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+local t2 = {}
+t2.f7 = argscheck("t2.f7 (string)") .. function (b) return 1 end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+local t2 = {}
+function t2:f8 (b: string) return 1 end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+local t2 = {}
+t2.f8 = argscheck("t2:f8 (string)") .. function (self, b) return 1 end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+local f1
+function f2()
+  f1 = function(b: string)
+    return 1
+  end
+end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+local f1
+f2 = argscheck("f2 ()") .. function () 
+  f1 = argscheck("f2.f1 (string)") .. function (b) 
+    return 1
+  end
+end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+function f2()
+  local f1 = function(b: string)
+    return 1
+  end
+end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f2 = argscheck("f2 ()") .. function () 
+  local f1 = argscheck("f2.f1 (string)") .. function (b) 
+    return 1
+  end
+end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+function f2()
+  local function f1(b: string)
+    return 1
+  end
+end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f2 = argscheck("f2 ()") .. function () 
+  local f1 = argscheck("f2.f1 (string)") .. function (b) 
+    return 1
+  end
+end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+function f2()
+  local t = {}
+  function t.f1(b: string)
+    return 1
+  end
+end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f2 = argscheck("f2 ()") .. function () 
+  local t = {}
+  t.f1 = argscheck("f2.f1 (string)") .. function (b) 
+    return 1
+  end
+end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+function f2()
+  local t = {
+    f1 = function(b: string)
+      return 1
+    end
+  }
+end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f2 = argscheck("f2 ()") .. function () 
+  local t = {
+    f1 = argscheck("f2.f1 (string)") .. function (b) 
+      return 1
+    end
+  }
+end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+
+-- function definition with different types
+
+s = [=[
+
+f_t1 = function() return end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t1 = argscheck("f_t1 ()") .. function () return  end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t2 = function(a: nil) : nil return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t2 = argscheck("f_t2 (nil) => nil") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t3 = function(a: boolean) : boolean return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t3 = argscheck("f_t3 (boolean) => boolean") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t4 = function(a: number) : number return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t4 = argscheck("f_t4 (number) => number") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t5 = function(a: string) : string return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t5 = argscheck("f_t5 (string) => string") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t6 = function(a: {}) : {} return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t6 = argscheck("f_t6 (table) => table") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t7 = function(a: () -> ()) : (() -> ()) return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t7 = argscheck("f_t7 (function) => function") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t8 = function(a: thread) : thread return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t8 = argscheck("f_t8 (thread) => thread") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t10 = function(a: integer) : integer return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t10 = argscheck("f_t10 (int) => int") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+--f_t11 = function(a: float) : float return a end
+--f_t12 = function(a: void) : void return a end
+
+s = [=[
+
+f_t13 = function(a: value) : value return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t13 = argscheck("f_t13 (any) => any") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_t14 = function(a: any) : any return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t14 = argscheck("f_t14 (any) => any") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+interface i1 end
+f_t15 = function(a: i1) : i1 return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_t15 = argscheck("f_t15 (table) => table") .. function (a) return a end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+--[[
+s = [=[
+userdata u1 end
+f_t16 = function(a: u1) : u1 return a end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+--]]
+
+-- function definition with type combinations
+
+s = [=[
+
+f_c1 = function(a: string?) : (number, number) | (nil, string) return 1, 2 end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_c1 = argscheck("f_c1 (?string) => (number, number) or (nil, string)") .. function (a) return 1, 2 end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_c2 = function(a: string | number) : nil end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_c2 = argscheck("f_c2 (string | number) => nil") .. function (a)  end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_c3 = function(a: string, ...) : nil end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_c3 = argscheck("f_c3 (string, ...) => nil") .. function (a, ...)  end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+s = [=[
+
+f_c4 = function(...: string) : (string*) end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+f_c4 = argscheck("f_c4 (string...) => string...") .. function (...)  end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+-- function inside function
+
+--test.lua:1:11: type error, return type '(number, nil*)' does not match '(number)'
+--test.lua:2:30: type error, return type '(string, nil*)' does not match '(string)'
+s = [=[
+
+function a(b: string, c: number) : boolean
+  local inner_func = function(d: string) : string
+    return d
+  end
+  return b == nil
+end
+]=]
+e = [=[
+local argscheck = require("typecheck").argscheck
+a = argscheck("a (string, number) => boolean") .. function (b, c) 
+  local inner_func = argscheck("a.inner_func (string) => string") .. function (d) 
+    return d
+  end
+  return b == nil
+end
+
+]=]
+
+r = generate_runtime(s)
+check(e, r)
+
+if failed_tests == 0 then
+  print("OK: " .. passed_tests .. " PASSED TESTS")
+  os.exit(0)
+else
+  print(failed_tests .. " FAILED TESTS, " .. passed_tests .. " PASSED TESTS")
+  os.exit(1)
+end
