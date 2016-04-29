@@ -3,6 +3,7 @@
 local tlast = require "typedlua.tlast"
 local tlparser = require "typedlua.tlparser"
 local tlchecker = require "typedlua.tlchecker"
+local tlruntime = require "typedlua.tlruntime"
 local tlcode = require "typedlua.tlcode"
 
 local VERSION = "scm"
@@ -12,6 +13,7 @@ local OUTPUT
 local DUMPAST = false
 local PRINTAST = false
 
+local RUNTIME = false
 local STRICT = false
 local WARNINGS = false
 local INTEGER = false
@@ -26,6 +28,7 @@ Available options are:
 -h	print this help
 -o name	output to file 'name' (default is '%s')
 -p	print the AST
+-r	add runtime checks
 -s	strict mode on
 -v	print current version
 -w	consistent-subtyping warnings on
@@ -57,6 +60,8 @@ local function doargs ()
       end
     elseif arg[i] == "-p" then
       PRINTAST = true
+    elseif arg[i] == "-r" then
+      RUNTIME = true
     elseif arg[i] == "-s" then
       STRICT = true
     elseif arg[i] == "-v" then
@@ -127,6 +132,10 @@ end
 local error_msg = tlchecker.typecheck(ast, subject, filename, STRICT, INTEGER)
 local error_msg, status = tlchecker.error_msgs(error_msg, WARNINGS)
 if error_msg then print(error_msg) end
+
+if RUNTIME then
+  tlruntime.add_runtime_checks(ast)
+end
 
 local generated_code = tlcode.generate(ast)
 setcontents(generated_code, OUTPUT)
