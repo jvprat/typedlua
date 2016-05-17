@@ -18,6 +18,7 @@ local opts =
 {
   STRICT = true,
   INTEGER = false,
+  RUNTIME = true,
   SHOW_WARNINGS = true
 }
 if _VERSION == "Lua 5.3" then opts.INTEGER = true end
@@ -53,6 +54,11 @@ function tlloader.compile (code, chunkname)
   elseif opts.SHOW_WARNINGS and errors_and_warnings then
     -- Print the warnings if requested
     print(errors_and_warnings)
+  end
+
+  -- Add the runtime checks
+  if opts.RUNTIME then
+    tlruntime.add_runtime_checks(ast)
   end
 
   -- Emit the Lua code
